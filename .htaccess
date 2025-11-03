@@ -1,0 +1,16 @@
+# CORS is handled by api/cors.php for API endpoints
+# Don't set CORS headers here to avoid duplicates
+# Only handle OPTIONS for non-API files if needed
+
+# Enable PHP
+AddHandler application/x-httpd-php .php
+
+# Prevent directory listing
+Options -Indexes
+
+# Security headers
+<IfModule mod_headers.c>
+    Header set X-Content-Type-Options "nosniff"
+    Header set X-Frame-Options "SAMEORIGIN"
+</IfModule>
+
