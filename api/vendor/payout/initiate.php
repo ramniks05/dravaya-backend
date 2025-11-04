@@ -156,8 +156,7 @@ try {
             'merchant_reference_id' => $merchantRefId,
             'transfer_type' => $beneficiary['transfer_type'],
             'apicode' => API_CODE,
-            'narration' => $narration,
-            'signature' => null
+            'narration' => $narration
         ];
         
         if ($beneficiary['transfer_type'] === 'UPI') {
@@ -167,32 +166,7 @@ try {
             $payload['ben_ifsc'] = strtoupper(trim($beneficiary['ifsc']));
             $payload['ben_bank_name'] = strtolower(trim($beneficiary['bank_name']));
         }
-    } else {
-        // Manual entry
-        $payload = [
-            'ben_name' => trim($data['ben_name']),
-            'ben_phone_number' => (string)$data['ben_phone_number'],
-            'amount' => (string)$amount,
-            'merchant_reference_id' => $merchantRefId,
-            'transfer_type' => $transferType,
-            'apicode' => API_CODE,
-            'narration' => $narration,
-            'signature' => null
-        ];
-        
-        if ($transferType === 'UPI') {
-            $payload['ben_vpa_address'] = trim($data['ben_vpa_address']);
-        } else {
-            $payload['ben_account_number'] = (string)$data['ben_account_number'];
-            $payload['ben_ifsc'] = strtoupper(trim($data['ben_ifsc']));
-            $payload['ben_bank_name'] = strtolower(trim($data['ben_bank_name']));
-        }
-        
-        // Validate phone number
-        if (!validatePhoneNumber($payload['ben_phone_number'])) {
-            throw new Exception('Invalid phone number format');
-        }
-    }
+    } 
     
     // Validate amount
     if (!validateAmount($amount)) {
@@ -205,32 +179,24 @@ try {
     $narration = $payload['narration'];
     $apicodeStr = (string)$payload['apicode'];
     
-    if ($payload['transfer_type'] === 'UPI') {
+   /* if ($payload['transfer_type'] === 'UPI') {
         // UPI signature format
         $signatureString = "{$payload['ben_name']}-{$payload['ben_phone_number']}-{$payload['ben_vpa_address']}-{$payload['amount']}-{$payload['merchant_reference_id']}-{$payload['transfer_type']}-{$apicodeStr}-{$narration}" . SECRET_KEY;
     } else {
         // IMPS/NEFT signature format
         $signatureString = "{$payload['ben_name']}-{$payload['ben_phone_number']}-{$payload['ben_account_number']}{$payload['ben_ifsc']}-{$payload['ben_bank_name']}-{$payload['amount']}-{$payload['merchant_reference_id']}-{$payload['transfer_type']}-{$apicodeStr}-{$narration}" . SECRET_KEY;
-    }
-    
+    }*/
+    $signatureString = implode("-", $payload) . SECRET_KEY;
     $payload['signature'] = hash('sha256', $signatureString);
     
     // Log signature for debugging
-    logError('Signature generated', [
-        'signature_string_length' => strlen($signatureString),
-        'signature_hash' => $payload['signature'],
-        'transfer_type' => $payload['transfer_type']
-    ], false);
-    
-    // Encrypt payload
     $payloadJson = json_encode($payload);
-    
-    // Log payload before encryption for debugging
-    logError('Payload Before Encryption', [
-        'payload_json' => $payloadJson,
-        'payload_keys' => array_keys($payload)
+
+    logError('Signature generated', [
+        'payload' =>  $payloadJson = json_encode($payload),
+        'signature' => $payload['signature']
     ], false);
-    
+
     // Generate IV - PayNinja expects 16-character alphanumeric IV
     $iv = generateIV();
     
@@ -244,6 +210,8 @@ try {
     // Test decryption to verify
     $decrypted = encrypt_decrypt('decrypt', $encdata, SECRET_KEY, $iv);
     logError('Decryption Test', [
+        'iv' =>$iv,
+        'encdata' => $encdata,
         'original' => $payloadJson,
         'decrypted' => $decrypted,
         'match' => $payloadJson === $decrypted
@@ -251,19 +219,16 @@ try {
     
     // Prepare request to PayNinja
     // PayNinja API expects lowercase 'iv' (not 'Iv')
+    
     $requestBody = [
         'encdata' => $encdata,
-        'key' => SECRET_KEY,
         'iv' => $iv  // PayNinja API expects lowercase 'iv'
     ];
     
     // Log request for debugging
     logError('PayNinja API Request', [
         'endpoint' => '/api/v1/payout/fundTransfer',
-        'merchant_reference_id' => $payload['merchant_reference_id'],
-        'transfer_type' => $payload['transfer_type'],
-        'iv_length' => strlen($iv),
-        'encdata_length' => strlen($encdata)
+        'merchant_reference_id' => $payload['merchant_reference_id']
     ], false);
     
     // Call PayNinja API

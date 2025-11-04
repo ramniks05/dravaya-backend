@@ -16,7 +16,7 @@ if (file_exists(__DIR__ . '/.env')) {
 define('API_BASE_URL', $_ENV['API_BASE_URL'] ?? 'https://dashboard.payninja.in');
 define('API_KEY', $_ENV['API_KEY'] ?? 'ucUzRVgPQdXuPwXgSnSqSCT7mhWJr0az');
 define('SECRET_KEY', $_ENV['SECRET_KEY'] ?? 'VXwdYI6AsM9nvWToAulDVkkvGXxJZ2rPSrfTfb4dHhbuqungDq6lAgvbf0JKz7ol');
-define('API_CODE', $_ENV['API_CODE'] ?? 810);
+define('API_CODE', $_ENV['API_CODE'] ?? 101);
 
 // Database Configuration - MySQL (XAMPP)
 define('DB_HOST', $_ENV['DB_HOST'] ?? 'localhost');
