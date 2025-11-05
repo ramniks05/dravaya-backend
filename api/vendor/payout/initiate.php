@@ -5,15 +5,33 @@
  * Automatically deducts amount from vendor wallet
  */
 
+// Turn off error display to prevent HTML output
+ini_set('display_errors', 0);
+ini_set('display_startup_errors', 0);
+error_reporting(E_ALL);
+
 require_once __DIR__ . '/../../cors.php';
 require_once '../../../config.php';
 require_once '../../../database/functions.php';
 require_once '../../../database/wallet_functions.php';
 
+// Re-start output buffering if cors.php ended it (to catch any accidental output)
+if (ob_get_level() == 0) {
+    ob_start();
+}
+
 // Set error handler to catch all errors and return JSON
 set_error_handler(function($severity, $message, $file, $line) {
     if (!(error_reporting() & $severity)) {
         return;
+    }
+    // Clean any output buffer
+    if (ob_get_level() > 0) {
+        ob_clean();
+    }
+    // Ensure JSON content type
+    if (!headers_sent()) {
+        header('Content-Type: application/json; charset=utf-8', true);
     }
     http_response_code(500);
     echo json_encode([
@@ -22,13 +40,27 @@ set_error_handler(function($severity, $message, $file, $line) {
         'file' => basename($file),
         'line' => $line
     ]);
+    if (ob_get_level() > 0) {
+        ob_end_flush();
+    }
     exit();
 });
 
 // Only allow POST requests
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    // Clean any output buffer
+    if (ob_get_level() > 0) {
+        ob_clean();
+    }
+    // Ensure proper headers
+    if (!headers_sent()) {
+        header('Content-Type: application/json; charset=utf-8', true);
+    }
     http_response_code(405);
-    echo json_encode(['status' => 'error', 'message' => 'Method not allowed']);
+    echo json_encode(['status' => 'error', 'message' => 'Method not allowed'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    if (ob_get_level() > 0) {
+        ob_end_flush();
+    }
     exit();
 }
 
@@ -53,8 +85,18 @@ try {
     $amount = floatval($data['amount']);
     $beneficiaryId = isset($data['beneficiary_id']) ? intval($data['beneficiary_id']) : null;
     $transferType = $data['transfer_type'] ?? null;
+    $paymentMode = $data['payment_mode'] ?? null;
     $merchantRefId = $data['merchant_reference_id'] ?? null;
     $narration = $data['narration'] ?? 'PAYNINJA Fund Transfer';
+    
+    // Log payment_mode if received
+    if ($paymentMode !== null) {
+        logError('Payment mode received in request', [
+            'payment_mode' => $paymentMode,
+            'vendor_id' => $vendorId,
+            'transfer_type' => $transferType
+        ], false);
+    }
     
     // Generate merchant reference ID if not provided
     if (!$merchantRefId) {
@@ -112,15 +154,13 @@ try {
         $beneficiary = $benResult->fetch_assoc();
         $benStmt->close();
         
-        // Use beneficiary's transfer type if not specified
+        // Use beneficiary's transfer type if not specified in request
+        // Beneficiaries can now use any payment type, not bound to their saved transfer type
         if (!$transferType) {
             $transferType = $beneficiary['transfer_type'];
         }
         
-        // Validate transfer type matches
-        if ($transferType !== $beneficiary['transfer_type']) {
-            throw new Exception('Transfer type does not match beneficiary transfer type');
-        }
+        // Note: Transfer type validation removed - beneficiaries can use any payment type
     } else {
         // Manual entry - validate all required fields
         $requiredFields = ['ben_name', 'ben_phone_number', 'transfer_type'];
@@ -131,40 +171,78 @@ try {
         }
         
         $transferType = $data['transfer_type'];
-        
-        // Validate transfer type specific fields
-        if ($transferType === 'UPI') {
-            if (!isset($data['ben_vpa_address']) || empty($data['ben_vpa_address'])) {
-                throw new Exception('ben_vpa_address is required for UPI transfers');
-            }
-        } else {
-            if (!isset($data['ben_account_number']) || empty($data['ben_account_number']) ||
-                !isset($data['ben_ifsc']) || empty($data['ben_ifsc']) ||
-                !isset($data['ben_bank_name']) || empty($data['ben_bank_name'])) {
-                throw new Exception('Account details (account_number, ifsc, bank_name) are required for IMPS/NEFT transfers');
-            }
-        }
+    }
+    
+    // Validate transfer type is valid (for both beneficiary and manual entry)
+    $validTransferTypes = ['UPI', 'IMPS', 'NEFT'];
+    if ($transferType && !in_array($transferType, $validTransferTypes)) {
+        throw new Exception("Invalid transfer_type. Must be one of: " . implode(', ', $validTransferTypes));
+    }
+    
+    // Ensure transfer_type is set
+    if (!$transferType) {
+        throw new Exception('transfer_type is required');
     }
     
     // Build payload for PayNinja API
     if ($beneficiary) {
-        // Use beneficiary details
+        // Use beneficiary details with the transfer type from request (or default to beneficiary's)
+        // Beneficiaries can now use any payment type, not bound to their saved transfer type
         $payload = [
             'ben_name' => trim($beneficiary['name']),
             'ben_phone_number' => (string)$beneficiary['phone_number'],
             'amount' => (string)$amount,
             'merchant_reference_id' => $merchantRefId,
-            'transfer_type' => $beneficiary['transfer_type'],
+            'transfer_type' => $transferType,  // Use requested transfer type, not beneficiary's stored type
             'apicode' => API_CODE,
             'narration' => $narration
         ];
         
-        if ($beneficiary['transfer_type'] === 'UPI') {
-            $payload['ben_vpa_address'] = trim($beneficiary['vpa_address']);
+        // Use beneficiary details based on the actual transfer type being used
+        // Allow request to override beneficiary details if provided
+        if ($transferType === 'UPI') {
+            // Use VPA from request if provided, otherwise from beneficiary
+            $payload['ben_vpa_address'] = isset($data['ben_vpa_address']) && !empty($data['ben_vpa_address'])
+                ? trim($data['ben_vpa_address'])
+                : trim($beneficiary['vpa_address'] ?? '');
+            
+            if (empty($payload['ben_vpa_address'])) {
+                throw new Exception('ben_vpa_address is required for UPI transfers. Please provide it in the request or ensure beneficiary has UPI details.');
+            }
         } else {
-            $payload['ben_account_number'] = (string)$beneficiary['account_number'];
-            $payload['ben_ifsc'] = strtoupper(trim($beneficiary['ifsc']));
-            $payload['ben_bank_name'] = strtolower(trim($beneficiary['bank_name']));
+            // IMPS/NEFT - use bank details from request if provided, otherwise from beneficiary
+            $payload['ben_account_number'] = isset($data['ben_account_number']) && !empty($data['ben_account_number'])
+                ? (string)$data['ben_account_number']
+                : (string)($beneficiary['account_number'] ?? '');
+            $payload['ben_ifsc'] = isset($data['ben_ifsc']) && !empty($data['ben_ifsc'])
+                ? strtoupper(trim($data['ben_ifsc']))
+                : strtoupper(trim($beneficiary['ifsc'] ?? ''));
+            $payload['ben_bank_name'] = isset($data['ben_bank_name']) && !empty($data['ben_bank_name'])
+                ? strtolower(trim($data['ben_bank_name']))
+                : strtolower(trim($beneficiary['bank_name'] ?? ''));
+            
+            if (empty($payload['ben_account_number']) || empty($payload['ben_ifsc']) || empty($payload['ben_bank_name'])) {
+                throw new Exception('Account details (account_number, ifsc, bank_name) are required for IMPS/NEFT transfers. Please provide them in the request or ensure beneficiary has bank details.');
+            }
+        }
+    } else {
+        // Manual entry - build payload from request data
+        $payload = [
+            'ben_name' => trim($data['ben_name']),
+            'ben_phone_number' => (string)$data['ben_phone_number'],
+            'amount' => (string)$amount,
+            'merchant_reference_id' => $merchantRefId,
+            'transfer_type' => $transferType,
+            'apicode' => API_CODE,
+            'narration' => $narration
+        ];
+        
+        if ($transferType === 'UPI') {
+            $payload['ben_vpa_address'] = trim($data['ben_vpa_address']);
+        } else {
+            $payload['ben_account_number'] = (string)$data['ben_account_number'];
+            $payload['ben_ifsc'] = strtoupper(trim($data['ben_ifsc']));
+            $payload['ben_bank_name'] = strtolower(trim($data['ben_bank_name']));
         }
     } 
     
@@ -246,6 +324,7 @@ try {
     $response = curl_exec($ch);
     $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     $curlError = curl_error($ch);
+    $curlInfo = curl_getinfo($ch);
     curl_close($ch);
     
     if ($curlError) {
@@ -253,13 +332,40 @@ try {
         throw new Exception('Network error: ' . $curlError);
     }
     
-    $result = json_decode($response, true);
-    
-    // Log PayNinja response for debugging
-    logError('PayNinja API Response', [
+    // Log raw response before JSON decode
+    logError('PayNinja API Raw Response', [
         'http_code' => $httpCode,
-        'response' => $result,
-        'merchant_ref_id' => $merchantRefId
+        'raw_response' => $response,
+        'response_length' => strlen($response),
+        'merchant_ref_id' => $merchantRefId,
+        'vendor_id' => $vendorId,
+        'curl_info' => [
+            'total_time' => $curlInfo['total_time'] ?? null,
+            'connect_time' => $curlInfo['connect_time'] ?? null,
+            'url' => $curlInfo['url'] ?? null
+        ]
+    ], false);
+    
+    $result = json_decode($response, true);
+    $jsonError = json_last_error();
+    
+    // Log payment response with comprehensive details
+    logError('PayNinja Payment Response', [
+        'http_code' => $httpCode,
+        'merchant_ref_id' => $merchantRefId,
+        'vendor_id' => $vendorId,
+        'amount' => $amount,
+        'transfer_type' => $transferType,
+        'payment_mode' => $paymentMode,
+        'json_decode_error' => $jsonError !== JSON_ERROR_NONE ? json_last_error_msg() : null,
+        'response_status' => $result['status'] ?? null,
+        'response_message' => $result['message'] ?? null,
+        'transaction_id' => $result['data']['transaction_id'] ?? $result['transaction_id'] ?? null,
+        'payninja_status' => $result['data']['status'] ?? null,
+        'response_data' => $result['data'] ?? null,
+        'response_errors' => $result['errors'] ?? null,
+        'full_response' => $result,
+        'raw_response' => $response
     ], false);
     
     // Prepare transaction data
@@ -273,6 +379,11 @@ try {
         'vendor_id' => $vendorId,
         'beneficiary_id' => $beneficiaryId
     ];
+    
+    // Add payment_mode if received
+    if ($paymentMode !== null) {
+        $transactionData['payment_mode'] = $paymentMode;
+    }
     
     if ($payload['transfer_type'] === 'UPI') {
         $transactionData['ben_vpa_address'] = $payload['ben_vpa_address'];
@@ -310,13 +421,25 @@ try {
             logTransactionActivity($transactionId, $merchantRefId, 'ERROR', $result);
         }
         
-        // Log detailed error
-        logError('PayNinja API validation error', [
+        // Log detailed payment response error
+        logError('Payment Response - Error', [
             'http_code' => $httpCode,
+            'merchant_ref_id' => $merchantRefId,
+            'vendor_id' => $vendorId,
+            'amount' => $amount,
+            'transfer_type' => $transferType,
+            'payment_mode' => $paymentMode,
             'error_message' => $errorMsg,
-            'errors' => $result['errors'] ?? null,
-            'full_response' => $result,
-            'merchant_ref_id' => $merchantRefId
+            'response_status' => $result['status'] ?? null,
+            'response_message' => $result['message'] ?? null,
+            'response_errors' => $result['errors'] ?? null,
+            'payment_response' => [
+                'status' => $result['status'] ?? null,
+                'message' => $result['message'] ?? null,
+                'errors' => $result['errors'] ?? null
+            ],
+            'full_payninja_response' => $result,
+            'raw_response' => $response
         ]);
         
         throw new Exception($errorMsg);
@@ -366,6 +489,30 @@ try {
         logTransactionActivity($transactionId, $merchantRefId, 'RESPONSE', $result);
     }
     
+    // Log complete payment response after processing
+    logError('Payment Response - Complete', [
+        'vendor_id' => $vendorId,
+        'merchant_ref_id' => $merchantRefId,
+        'transaction_id' => $transactionId,
+        'payninja_transaction_id' => $transactionData['payninja_transaction_id'],
+        'amount' => $amount,
+        'transfer_type' => $transferType,
+        'payment_mode' => $paymentMode,
+        'wallet_deducted' => $walletDeducted,
+        'balance_before' => $deductResult['balance_before'] ?? $walletBalance,
+        'balance_after' => $deductResult['balance_after'] ?? $walletBalance,
+        'payninja_status' => $payninjaStatus,
+        'mapped_status' => $mappedStatus,
+        'payment_response' => [
+            'status' => $result['status'] ?? null,
+            'message' => $result['message'] ?? null,
+            'transaction_id' => $transactionData['payninja_transaction_id'],
+            'payninja_status' => $payninjaStatus,
+            'data' => $result['data'] ?? null
+        ],
+        'full_payninja_response' => $result
+    ], false);
+    
     logError('Vendor payout initiated', [
         'vendor_id' => $vendorId,
         'merchant_ref_id' => $merchantRefId,
@@ -376,9 +523,18 @@ try {
         'mapped_status' => $mappedStatus
     ], false);
     
-    // Return response
+    // Return response - ensure clean output
+    if (ob_get_level() > 0) {
+        ob_clean();
+    }
+    
+    // Ensure proper headers
+    if (!headers_sent()) {
+        header('Content-Type: application/json; charset=utf-8', true);
+    }
+    
     http_response_code(200);
-    echo json_encode([
+    $response = [
         'status' => 'success',
         'message' => 'Payout initiated successfully',
         'data' => [
@@ -388,7 +544,8 @@ try {
                 'amount' => $amount,
                 'transfer_type' => $payload['transfer_type'],
                 'status' => $mappedStatus,
-                'payninja_status' => $payninjaStatus  // Original PayNinja status
+                'payninja_status' => $payninjaStatus,  // Original PayNinja status
+                'payment_mode' => $paymentMode  // Payment mode from request (if provided)
             ],
             'wallet' => [
                 'balance_before' => $deductResult['balance_before'] ?? $walletBalance,
@@ -398,9 +555,26 @@ try {
             'beneficiary_used' => $beneficiaryId ? true : false,
             'payninja_response' => $result
         ]
-    ]);
+    ];
+    
+    echo json_encode($response, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    
+    if (ob_get_level() > 0) {
+        ob_end_flush();
+    }
+    exit();
     
 } catch (Exception $e) {
+    // Clean any output buffer
+    if (ob_get_level() > 0) {
+        ob_clean();
+    }
+    
+    // Ensure proper headers
+    if (!headers_sent()) {
+        header('Content-Type: application/json; charset=utf-8', true);
+    }
+    
     $errorCode = http_response_code();
     if ($errorCode === 200 || !$errorCode) {
         http_response_code(400);
@@ -432,9 +606,15 @@ try {
         'trace' => $e->getTraceAsString(),
         'raw_input' => $rawInput ?? 'not set',
         'vendor_id' => $vendorId ?? 'not set',
-        'amount' => $amount ?? 'not set'
+        'amount' => $amount ?? 'not set',
+        'payment_mode' => $paymentMode ?? 'not set'
     ]);
     
-    echo json_encode($errorResponse, JSON_PRETTY_PRINT);
+    echo json_encode($errorResponse, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    
+    if (ob_get_level() > 0) {
+        ob_end_flush();
+    }
+    exit();
 }
 

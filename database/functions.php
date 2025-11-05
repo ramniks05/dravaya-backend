@@ -331,3 +331,54 @@ function getTransactionStats($startDate = null, $endDate = null) {
     }
 }
 
+/**
+ * Update transaction status with webhook data (includes UTR)
+ */
+function updateTransactionStatusWithWebhook($merchantReferenceId, $status, $apiResponse = null, $apiError = null, $utr = null) {
+    try {
+        $conn = getDBConnection();
+        
+        // Check if UTR column exists
+        $checkColumn = $conn->query("SHOW COLUMNS FROM transactions LIKE 'utr'");
+        $hasUtrColumn = $checkColumn && $checkColumn->num_rows > 0;
+        
+        if ($hasUtrColumn && $utr !== null) {
+            // Update with UTR
+            $query = "UPDATE transactions SET 
+                status = ?,
+                api_response = ?,
+                api_error = ?,
+                utr = ?,
+                updated_at = CURRENT_TIMESTAMP
+                WHERE merchant_reference_id = ?";
+            
+            $stmt = $conn->prepare($query);
+            $stmt->bind_param('sssss', $status, $apiResponse, $apiError, $utr, $merchantReferenceId);
+        } else {
+            // Update without UTR
+            $query = "UPDATE transactions SET 
+                status = ?,
+                api_response = ?,
+                api_error = ?,
+                updated_at = CURRENT_TIMESTAMP
+                WHERE merchant_reference_id = ?";
+            
+            $stmt = $conn->prepare($query);
+            $stmt->bind_param('ssss', $status, $apiResponse, $apiError, $merchantReferenceId);
+        }
+        
+        $stmt->execute();
+        $affectedRows = $stmt->affected_rows;
+        $stmt->close();
+        
+        return $affectedRows > 0;
+        
+    } catch (Exception $e) {
+        logError('Failed to update transaction status from webhook', [
+            'error' => $e->getMessage(),
+            'merchant_reference_id' => $merchantReferenceId
+        ]);
+        return false;
+    }
+}
+

@@ -24,12 +24,36 @@ $allowedOrigins = [
     'http://127.0.0.1:5173',
     'http://127.0.0.1:3000',
     'http://127.0.0.1:3001',
+    'http://dravya.hrntechsolutions.com',
+    'https://dravya.hrntechsolutions.com',
 ];
 
-// Determine allowed origin - use * for development
-$allowedOrigin = '*';
+// Determine allowed origin
+// Note: Cannot use '*' when Access-Control-Allow-Credentials is true
+$allowedOrigin = null;
+
+// Check if origin is in allowed list
 if ($origin && in_array($origin, $allowedOrigins)) {
     $allowedOrigin = $origin;
+} else {
+    // For development, allow any origin if not in production
+    $isProduction = strpos($_SERVER['HTTP_HOST'] ?? '', 'dravya.hrntechsolutions.com') !== false;
+    
+    if (!$isProduction) {
+        // Development: Allow any origin but don't set credentials
+        $allowedOrigin = $origin ?: '*';
+    } else {
+        // Production: Check if origin matches production domain pattern
+        if ($origin && (
+            strpos($origin, 'http://dravya.hrntechsolutions.com') === 0 ||
+            strpos($origin, 'https://dravya.hrntechsolutions.com') === 0
+        )) {
+            $allowedOrigin = $origin;
+        } else {
+            // Production fallback: use first matching production origin
+            $allowedOrigin = 'https://dravya.hrntechsolutions.com';
+        }
+    }
 }
 
 // Set CORS headers immediately - MUST be first
@@ -38,10 +62,17 @@ $GLOBALS['cors_headers_set'] = true;
 
 // Use true parameter to replace any existing headers (prevents duplicates)
 if (!headers_sent()) {
-    header("Access-Control-Allow-Origin: {$allowedOrigin}", true);
+    if ($allowedOrigin) {
+        header("Access-Control-Allow-Origin: {$allowedOrigin}", true);
+    }
     header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS, PATCH', true);
     header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, api-Key, Accept, Origin', true);
-    header('Access-Control-Allow-Credentials: true', true);
+    
+    // Only set credentials if origin is not wildcard
+    if ($allowedOrigin !== '*') {
+        header('Access-Control-Allow-Credentials: true', true);
+    }
+    
     header('Access-Control-Max-Age: 86400', true);
 }
 

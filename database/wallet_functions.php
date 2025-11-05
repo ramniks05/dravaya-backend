@@ -149,7 +149,7 @@ function deductFromWallet($vendorId, $amount, $referenceId = null, $description 
             (vendor_id, transaction_type, amount, balance_before, balance_after, reference_id, description)
             VALUES (?, 'deduction', ?, ?, ?, ?, ?)
         ");
-        $transStmt->bind_param('sddds', 
+        $transStmt->bind_param('sdddss', 
             $vendorId, 
             $amount, 
             $balanceBefore, 
