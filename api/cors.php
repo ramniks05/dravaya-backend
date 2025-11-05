@@ -26,6 +26,7 @@ $allowedOrigins = [
     'http://127.0.0.1:3001',
     'http://dravya.hrntechsolutions.com',
     'https://dravya.hrntechsolutions.com',
+    'https://dravaya-frontend.vercel.app'
 ];
 
 // Determine allowed origin

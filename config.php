@@ -7,8 +7,13 @@
 // Load environment variables if .env file exists
 if (file_exists(__DIR__ . '/.env')) {
     $env = parse_ini_file(__DIR__ . '/.env');
-    foreach ($env as $key => $value) {
-        $_ENV[$key] = $value;
+    if ($env !== false) {
+        foreach ($env as $key => $value) {
+            $_ENV[$key] = $value;
+        }
+    } else {
+        // Log error if .env file exists but couldn't be parsed
+        error_log('Warning: Failed to parse .env file. Check for syntax errors.');
     }
 }
 
@@ -34,8 +39,8 @@ $allowedOrigins = [
     'http://127.0.0.1:3000',
     'http://127.0.0.1:3001',
     'http://127.0.0.1:5173',      // Vite dev server (127.0.0.1)
-    // Add your production frontend URL here
-    // 'https://your-frontend-domain.com'
+    // Production frontend URL(s)
+    'https://dravaya-frontend.vercel.app'
 ];
 
 $origin = $_SERVER['HTTP_ORIGIN'] ?? '';

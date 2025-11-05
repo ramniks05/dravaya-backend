@@ -24,8 +24,8 @@ if (ob_get_level() == 0) {
 }
 
 require_once __DIR__ . '/../cors.php';
-require_once '../../config.php';
-require_once '../../database/functions.php';
+require_once __DIR__ . '/../../config.php';
+require_once __DIR__ . '/../../database/functions.php';
 
 // Re-start output buffering if cors.php ended it
 if (ob_get_level() == 0) {
@@ -83,7 +83,7 @@ try {
     // Log incoming webhook (for debugging)
     logError('Webhook Received', [
         'raw_input' => $rawInput,
-        'headers' => getallheaders(),
+        'headers' => function_exists('getallheaders') ? getallheaders() : [],
         'method' => $_SERVER['REQUEST_METHOD']
     ], false);
     
@@ -269,4 +269,3 @@ try {
     }
     exit();
 }
-
