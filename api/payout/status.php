@@ -1,7 +1,14 @@
 <?php
 /**
  * Check Transaction Status API Endpoint
+ * Checks latest transaction status from PayNinja and updates database
+ * Updates UTR if not already set
  */
+
+// Disable error display to prevent HTML in JSON response
+error_reporting(E_ALL);
+ini_set('display_errors', 0);
+ini_set('log_errors', 1);
 
 // CORS Headers - Must be first
 require_once __DIR__ . '/../cors.php';
@@ -72,13 +79,15 @@ try {
         throw new Exception($errorMsg);
     }
     
-    // Update transaction status in database
-    $status = $result['data']['transaction_status'] ?? $result['status'] ?? 'PENDING';
+    // Extract data from PayNinja response according to their API format
+    // Response format: { "status": "success", "data": { "status": "processing", "utr": null, "mode": "NEFT", ... } }
+    $payninjaStatus = $result['data']['status'] ?? 'pending';  // Fixed: use 'status' not 'transaction_status'
+    $utr = $result['data']['utr'] ?? null;
     $apiResponse = json_encode($result);
     
     // Map PayNinja status to our status
     // PayNinja status values: pending, failed, processing, success, reversed (lowercase)
-    $statusLower = strtolower($status);
+    $statusLower = strtolower($payninjaStatus);
     $statusMap = [
         'pending' => 'PENDING',
         'processing' => 'PROCESSING',
@@ -88,13 +97,17 @@ try {
     ];
     $dbStatus = $statusMap[$statusLower] ?? 'PENDING';
     
-    updateTransactionStatus($merchantRefId, $dbStatus, $apiResponse);
+    // Always update both status and UTR (if provided) together
+    // Use webhook function which handles both status and UTR updates
+    // This ensures status is always updated, and UTR is updated when available
+    updateTransactionStatusWithWebhook($merchantRefId, $dbStatus, $apiResponse, null, $utr);
     
     // Log activity if transaction exists in database
     if ($dbTransaction) {
         logTransactionActivity($dbTransaction['id'], $merchantRefId, 'STATUS_CHECK', $result);
     }
     
+    // Return PayNinja response as-is
     echo json_encode($result);
     
 } catch (Exception $e) {

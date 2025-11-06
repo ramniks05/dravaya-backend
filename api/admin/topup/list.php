@@ -4,6 +4,11 @@
  * Admin endpoint to list all topup requests with filters
  */
 
+// Disable error display to prevent HTML in JSON response
+error_reporting(E_ALL);
+ini_set('display_errors', 0);
+ini_set('log_errors', 1);
+
 require_once __DIR__ . '/../../cors.php';
 require_once '../../../config.php';
 require_once '../../../database/wallet_functions.php';
