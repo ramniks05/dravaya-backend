@@ -1,0 +1,72 @@
+<?php
+/**
+ * User Logout API Endpoint
+ * Invalidates active session token
+ */
+
+require_once __DIR__ . '/../cors.php';
+require_once '../../config.php';
+require_once '../../database/functions.php';
+require_once '../../database/session_functions.php';
+
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    http_response_code(405);
+    echo json_encode(['status' => 'error', 'message' => 'Method not allowed']);
+    exit();
+}
+
+try {
+    $authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
+    $token = null;
+
+    if (preg_match('/Bearer\s+(.*)$/i', $authHeader, $matches)) {
+        $token = trim($matches[1]);
+    }
+
+    if (!$token) {
+        $rawInput = file_get_contents('php://input');
+        $data = json_decode($rawInput, true);
+        if (isset($data['token']) && !empty($data['token'])) {
+            $token = $data['token'];
+        }
+    }
+
+    if (!$token) {
+        throw new Exception('Missing session token');
+    }
+
+    $session = validateSessionToken($token);
+
+    if (!$session) {
+        // Token already invalid or expired
+        invalidateSessionByToken($token);
+        http_response_code(200);
+        echo json_encode([
+            'status' => 'success',
+            'message' => 'Logged out'
+        ]);
+        return;
+    }
+
+    invalidateSessionByToken($token);
+
+    logError('User logged out', [
+        'user_id' => $session['user_id'],
+        'email' => $session['email'] ?? null
+    ], false);
+
+    http_response_code(200);
+    echo json_encode([
+        'status' => 'success',
+        'message' => 'Logged out successfully'
+    ]);
+
+} catch (Exception $e) {
+    http_response_code(400);
+    echo json_encode([
+        'status' => 'error',
+        'message' => $e->getMessage()
+    ]);
+}
+
+

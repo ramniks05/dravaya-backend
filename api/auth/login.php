@@ -9,6 +9,7 @@ require_once __DIR__ . '/../cors.php';
 
 require_once '../../config.php';
 require_once '../../database/functions.php';
+require_once '../../database/session_functions.php';
 
 // Only allow POST requests
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
@@ -145,11 +146,28 @@ try {
         exit();
     }
     
+    // Prevent concurrent logins
+    $existingSession = getActiveUserSession($user['id']);
+    if ($existingSession) {
+        logError('Concurrent login attempt blocked', [
+            'user_id' => $user['id'],
+            'email' => $user['email'],
+            'existing_session_expires_at' => $existingSession['expires_at'] ?? null,
+            'existing_session_last_active' => $existingSession['last_active'] ?? null
+        ], false);
+
+        http_response_code(409);
+        echo json_encode([
+            'status' => 'error',
+            'message' => 'You are already logged in on another device. Please log out there first.'
+        ]);
+        exit();
+    }
+
     // Generate session token (simple token for now, can be upgraded to JWT)
     $token = bin2hex(random_bytes(32));
-    
-    // Store token in database (optional - for token validation)
-    // For now, we'll just return it. You can create a sessions table later if needed
+
+    $sessionInfo = createUserSession($user['id'], $token);
     
     // Log successful login
     logError('User logged in successfully', [
@@ -170,7 +188,8 @@ try {
                 'role' => $user['role'],      // REQUIRED: 'admin' or 'vendor'
                 'status' => $user['status']   // REQUIRED: 'active', 'pending', 'suspended'
             ],
-            'token' => $token  // Session token
+            'token' => $token,  // Session token
+            'session_expires_at' => $sessionInfo['expires_at'] ?? null
         ]
     ]);
     

@@ -6,6 +6,108 @@
 require_once __DIR__ . '/../config.php';
 
 /**
+ * Refund amount to vendor wallet for failed payout (without duplicating refunds)
+ */
+function refundVendorWalletForFailedPayout($vendorId, $amount, $referenceId, $description = null) {
+    $conn = getDBConnection();
+
+    if (empty($vendorId) || !$amount || $amount <= 0) {
+        return ['success' => false, 'error' => 'Invalid refund parameters'];
+    }
+
+    $conn->begin_transaction();
+
+    try {
+        // Check if refund already processed
+        $checkStmt = $conn->prepare("
+            SELECT id FROM wallet_transactions
+            WHERE vendor_id = ? AND reference_id = ? AND transaction_type = 'refund'
+            LIMIT 1
+        ");
+        $checkStmt->bind_param('ss', $vendorId, $referenceId);
+        $checkStmt->execute();
+        $checkResult = $checkStmt->get_result();
+
+        if ($checkResult->num_rows > 0) {
+            $checkStmt->close();
+            $conn->rollback();
+            return ['success' => true, 'already_processed' => true];
+        }
+        $checkStmt->close();
+
+        // Ensure original deduction exists before refunding
+        $deductionStmt = $conn->prepare("
+            SELECT id FROM wallet_transactions
+            WHERE vendor_id = ? AND reference_id = ? AND transaction_type = 'deduction'
+            LIMIT 1
+        ");
+        $deductionStmt->bind_param('ss', $vendorId, $referenceId);
+        $deductionStmt->execute();
+        $deductionResult = $deductionStmt->get_result();
+
+        if ($deductionResult->num_rows === 0) {
+            $deductionStmt->close();
+            $conn->rollback();
+            return ['success' => false, 'error' => 'No matching deduction found'];
+        }
+        $deductionStmt->close();
+
+        // Get current wallet balance
+        $wallet = getVendorWallet($vendorId);
+        $balanceBefore = floatval($wallet['balance']);
+        $balanceAfter = $balanceBefore + floatval($amount);
+
+        // Update wallet balance
+        $updatedAt = getIstTimestamp();
+        $updateStmt = $conn->prepare("
+            UPDATE vendor_wallets
+            SET balance = ?, updated_at = ?
+            WHERE vendor_id = ?
+        ");
+        $updateStmt->bind_param('dss', $balanceAfter, $updatedAt, $vendorId);
+        $updateStmt->execute();
+        $updateStmt->close();
+
+        // Record refund transaction
+        $description = $description ?? 'Refund for failed payout ' . $referenceId;
+        $transStmt = $conn->prepare("
+            INSERT INTO wallet_transactions
+            (vendor_id, transaction_type, amount, balance_before, balance_after, reference_id, description)
+            VALUES (?, 'refund', ?, ?, ?, ?, ?)
+        ");
+        $transStmt->bind_param('sdddss',
+            $vendorId,
+            $amount,
+            $balanceBefore,
+            $balanceAfter,
+            $referenceId,
+            $description
+        );
+        $transStmt->execute();
+        $transactionId = $conn->insert_id;
+        $transStmt->close();
+
+        $conn->commit();
+
+        return [
+            'success' => true,
+            'transaction_id' => $transactionId,
+            'balance_before' => $balanceBefore,
+            'balance_after' => $balanceAfter
+        ];
+
+    } catch (Exception $e) {
+        $conn->rollback();
+        logError('Error refunding wallet for failed payout', [
+            'error' => $e->getMessage(),
+            'vendor_id' => $vendorId,
+            'reference_id' => $referenceId
+        ]);
+        return ['success' => false, 'error' => $e->getMessage()];
+    }
+}
+
+/**
  * Get or create vendor wallet
  */
 function getVendorWallet($vendorId) {

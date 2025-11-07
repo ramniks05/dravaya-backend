@@ -72,12 +72,13 @@ Authenticates user and returns user data with role and status.
       "role": "vendor",        // 'admin' or 'vendor'
       "status": "active"       // 'active', 'pending', or 'suspended'
     },
-    "token": "session-token-here"
+    "token": "session-token-here",
+    "session_expires_at": "2025-11-07 18:30:00"
   }
 }
 ```
 
-### Response (Error - 400/403)
+### Response (Error - 400/403/409)
 
 **Invalid Credentials (400):**
 ```json
@@ -100,6 +101,14 @@ Authenticates user and returns user data with role and status.
 {
   "status": "error",
   "message": "Your account has been suspended. Please contact support."
+}
+```
+
+**Already Logged In (409):**
+```json
+{
+  "status": "error",
+  "message": "You are already logged in on another device. Please log out there first."
 }
 ```
 
@@ -130,6 +139,22 @@ CREATE TABLE users (
     status ENUM('active', 'pending', 'suspended') NOT NULL DEFAULT 'pending',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+```
+
+Active session records are stored in the `user_sessions` table (created automatically):
+
+```sql
+CREATE TABLE IF NOT EXISTS user_sessions (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id VARCHAR(36) NOT NULL,
+    token VARCHAR(128) NOT NULL UNIQUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    expires_at DATETIME NOT NULL,
+    is_active TINYINT(1) DEFAULT 1,
+    INDEX idx_user (user_id),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 ```
 
@@ -183,5 +208,30 @@ const login = async (email, password) => {
 2. **Email Validation**: Email is validated using PHP's `filter_var()` with `FILTER_VALIDATE_EMAIL`.
 3. **SQL Injection**: Protected using prepared statements.
 4. **CORS**: Configured in `config.php` to allow React frontend origins.
-5. **Token**: Simple session token is generated. Consider implementing JWT for production.
+5. **Session Tokens**: A single active session is enforced per user. Tokens expire automatically after 12 hours or when `/api/auth/logout.php` is called. Consider upgrading to JWT for production.
+
+---
+
+## Logout Endpoint
+
+**POST** `/api/auth/logout.php`
+
+Invalidates the current session token. Token can be supplied in the `Authorization: Bearer <token>` header or in the JSON body.
+
+### Request Body (optional)
+```json
+{
+  "token": "session-token-here"
+}
+```
+
+### Response (Success - 200)
+```json
+{
+  "status": "success",
+  "message": "Logged out successfully"
+}
+```
+
+If the token is already expired or invalid, the endpoint still returns success for idempotency.
 

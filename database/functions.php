@@ -35,16 +35,18 @@ function saveTransaction($transactionData) {
                 status = ?,
                 api_response = ?,
                 api_error = ?,
-                updated_at = CURRENT_TIMESTAMP
+                updated_at = ?
                 WHERE id = ?";
             
             $stmt = $conn->prepare($updateQuery);
+            $updatedAt = getIstTimestamp();
             $stmt->bind_param(
-                'ssssi',
+                'sssssi',
                 $payninjaTxnId,
                 $status,
                 $apiResponse,
                 $apiError,
+                $updatedAt,
                 $transactionId
             );
             $stmt->execute();
@@ -180,11 +182,12 @@ function updateTransactionStatus($merchantReferenceId, $status, $apiResponse = n
             status = ?,
             api_response = ?,
             api_error = ?,
-            updated_at = CURRENT_TIMESTAMP
+            updated_at = ?
             WHERE merchant_reference_id = ?";
         
         $stmt = $conn->prepare($query);
-        $stmt->bind_param('ssss', $status, $apiResponse, $apiError, $merchantReferenceId);
+        $updatedAt = getIstTimestamp();
+        $stmt->bind_param('sssss', $status, $apiResponse, $apiError, $updatedAt, $merchantReferenceId);
         $stmt->execute();
         $affectedRows = $stmt->affected_rows;
         $stmt->close();
@@ -349,22 +352,24 @@ function updateTransactionStatusWithWebhook($merchantReferenceId, $status, $apiR
                 api_response = ?,
                 api_error = ?,
                 utr = ?,
-                updated_at = CURRENT_TIMESTAMP
+                updated_at = ?
                 WHERE merchant_reference_id = ?";
             
             $stmt = $conn->prepare($query);
-            $stmt->bind_param('sssss', $status, $apiResponse, $apiError, $utr, $merchantReferenceId);
+            $updatedAt = getIstTimestamp();
+            $stmt->bind_param('ssssss', $status, $apiResponse, $apiError, $utr, $updatedAt, $merchantReferenceId);
         } else {
             // Update without UTR
             $query = "UPDATE transactions SET 
                 status = ?,
                 api_response = ?,
                 api_error = ?,
-                updated_at = CURRENT_TIMESTAMP
+                updated_at = ?
                 WHERE merchant_reference_id = ?";
             
             $stmt = $conn->prepare($query);
-            $stmt->bind_param('ssss', $status, $apiResponse, $apiError, $merchantReferenceId);
+            $updatedAt = getIstTimestamp();
+            $stmt->bind_param('sssss', $status, $apiResponse, $apiError, $updatedAt, $merchantReferenceId);
         }
         
         $stmt->execute();

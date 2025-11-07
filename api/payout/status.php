@@ -15,6 +15,7 @@ require_once __DIR__ . '/../cors.php';
 
 require_once '../../config.php';
 require_once '../../database/functions.php';
+require_once '../../database/wallet_functions.php';
 
 // Only allow POST requests
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
@@ -40,6 +41,9 @@ try {
     
     // First check if we have the transaction in database
     $dbTransaction = getTransactionByReferenceId($merchantRefId);
+    $previousStatus = $dbTransaction['status'] ?? null;
+    $vendorId = $dbTransaction['vendor_id'] ?? null;
+    $transactionAmount = isset($dbTransaction['amount']) ? floatval($dbTransaction['amount']) : 0;
     
     // Call PayNinja API - According to docs, this should be POST with merchant_reference_id in body
     $requestBody = json_encode([
@@ -101,10 +105,39 @@ try {
     // Use webhook function which handles both status and UTR updates
     // This ensures status is always updated, and UTR is updated when available
     updateTransactionStatusWithWebhook($merchantRefId, $dbStatus, $apiResponse, null, $utr);
+
+    $walletRefundResult = null;
+    if (
+        $dbTransaction &&
+        $previousStatus !== 'FAILED' &&
+        $dbStatus === 'FAILED' &&
+        !empty($vendorId) &&
+        $transactionAmount > 0
+    ) {
+        $walletRefundResult = refundVendorWalletForFailedPayout(
+            $vendorId,
+            $transactionAmount,
+            $merchantRefId,
+            'Refund for failed payout ' . $merchantRefId
+        );
+
+        if (!($walletRefundResult['success'] ?? false) && !($walletRefundResult['already_processed'] ?? false)) {
+            logError('Failed to process vendor wallet refund for failed payout', [
+                'merchant_reference_id' => $merchantRefId,
+                'vendor_id' => $vendorId,
+                'amount' => $transactionAmount,
+                'refund_result' => $walletRefundResult
+            ]);
+        }
+    }
     
     // Log activity if transaction exists in database
     if ($dbTransaction) {
-        logTransactionActivity($dbTransaction['id'], $merchantRefId, 'STATUS_CHECK', $result);
+        $logPayload = $result;
+        if ($walletRefundResult !== null) {
+            $logPayload['wallet_refund'] = $walletRefundResult;
+        }
+        logTransactionActivity($dbTransaction['id'], $merchantRefId, 'STATUS_CHECK', $logPayload);
     }
     
     // Return PayNinja response as-is

@@ -17,6 +17,11 @@ if (file_exists(__DIR__ . '/.env')) {
     }
 }
 
+// Ensure PHP uses Indian Standard Time by default
+date_default_timezone_set('Asia/Kolkata');
+
+require_once __DIR__ . '/utils/time.php';
+
 // API Configuration - Use environment variables if available, otherwise fallback to hardcoded (for development)
 define('API_BASE_URL', $_ENV['API_BASE_URL'] ?? 'https://dashboard.payninja.in');
 define('API_KEY', $_ENV['API_KEY'] ?? 'ucUzRVgPQdXuPwXgSnSqSCT7mhWJr0az');
@@ -175,6 +180,13 @@ function getDBConnection() {
         try {
             $conn = new mysqli(DB_HOST, DB_USER, DB_PASS, DB_NAME);
             $conn->set_charset(DB_CHARSET);
+
+            // Ensure MySQL session uses IST for timestamp defaults
+            if (!$conn->query("SET time_zone = '+05:30'")) {
+                logError('Failed to set database session timezone to IST', [
+                    'error' => $conn->error
+                ], false);
+            }
         } catch (mysqli_sql_exception $e) {
             logError('Database connection failed', ['error' => $e->getMessage()]);
             throw new Exception('Database connection failed: ' . $e->getMessage());
