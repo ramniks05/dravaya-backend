@@ -40,6 +40,13 @@ if (file_exists($envPath)) {
 } else {
     echo "2. .env file NOT FOUND!\n";
     echo "   Please create it at: $envPath\n";
+    echo "\n   Suggested contents:\n";
+    echo "   # Database Configuration\n";
+    echo "   DB_HOST=localhost\n";
+    echo "   DB_USER=hrntechs_ramesh\n";
+    echo "   DB_PASS=ramesh@1234\n";
+    echo "   DB_NAME=hrntechs_dravya\n";
+    echo "   DB_CHARSET=utf8mb4\n";
 }
 
 echo "\n4. Current configuration values:\n";
