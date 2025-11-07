@@ -30,9 +30,9 @@ define('API_CODE', $_ENV['API_CODE'] ?? 101);
 
 // Database Configuration - MySQL (XAMPP)
 define('DB_HOST', $_ENV['DB_HOST'] ?? 'localhost');
-define('DB_USER', $_ENV['DB_USER'] ?? 'root');
-define('DB_PASS', $_ENV['DB_PASS'] ?? '');
-define('DB_NAME', $_ENV['DB_NAME'] ?? 'dravya');
+define('DB_USER', $_ENV['DB_USER'] ?? 'hrntechs_ramesh');
+define('DB_PASS', $_ENV['DB_PASS'] ?? 'ramesh@1234');
+define('DB_NAME', $_ENV['DB_NAME'] ?? 'hrntechs_dravya');
 define('DB_CHARSET', $_ENV['DB_CHARSET'] ?? 'utf8mb4');
 
 // CORS Configuration - Allow specific origins for security
