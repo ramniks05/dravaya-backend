@@ -235,3 +235,35 @@ Invalidates the current session token. Token can be supplied in the `Authorizati
 
 If the token is already expired or invalid, the endpoint still returns success for idempotency.
 
+---
+
+## Logout From All Devices
+
+**POST** `/api/auth/logout_all.php`
+
+Terminates every active session for the authenticated user (forced logout on all devices).
+
+### Request
+Provide the current session token in the `Authorization` header (recommended) or JSON body.
+
+```http
+POST /api/auth/logout_all.php
+Authorization: Bearer session-token-here
+```
+
+```json
+{
+  "token": "session-token-here"
+}
+```
+
+### Response (Success - 200)
+```json
+{
+  "status": "success",
+  "message": "All sessions have been terminated"
+}
+```
+
+If the token is invalid or expired, the endpoint returns a 400 error with the failure reason.
+
