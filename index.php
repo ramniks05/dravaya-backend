@@ -299,6 +299,7 @@
             <div class="info-grid">
                 <?php
                 require_once __DIR__ . '/config.php';
+                require_once __DIR__ . '/database/functions.php';
                 $dbTest = testDatabaseConnection();
                 ?>
                 <div class="info-card">
