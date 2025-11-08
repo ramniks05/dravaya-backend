@@ -48,6 +48,7 @@ try {
     
     $email = filter_var(trim($data['email']), FILTER_VALIDATE_EMAIL);
     $password = $data['password'];  // Don't trim password - may contain intentional spaces
+    $forceLogin = isset($data['force_login']) ? (bool)$data['force_login'] : false;
     
     if (!$email) {
         throw new Exception('Invalid email format: ' . $data['email']);
@@ -147,18 +148,37 @@ try {
     }
     
     // Generate session token (simple token for now, can be upgraded to JWT)
-    $token = bin2hex(random_bytes(32));
-    
-    // Replace any existing active session (enforce single session per user)
     $existingSession = getActiveUserSession($user['id']);
-    if ($existingSession) {
-        logError('Existing session replaced during login', [
+    if ($existingSession && !$forceLogin) {
+        logError('Concurrent login attempt detected', [
+            'user_id' => $user['id'],
+            'email' => $user['email'],
+            'existing_session_expires_at' => $existingSession['expires_at'] ?? null,
+            'existing_session_last_active' => $existingSession['last_active'] ?? null
+        ], false);
+
+        http_response_code(409);
+        echo json_encode([
+            'status' => 'error',
+            'message' => 'You are already logged in on another device. Please log out there first or set force_login=true to override.',
+            'code' => 'CONCURRENT_SESSION',
+            'data' => [
+                'session_expires_at' => $existingSession['expires_at'] ?? null
+            ]
+        ]);
+        exit();
+    }
+
+    if ($existingSession && $forceLogin) {
+        invalidateSessionsByUser($user['id']);
+        logError('Existing session terminated via force login', [
             'user_id' => $user['id'],
             'email' => $user['email'],
             'previous_session_id' => $existingSession['id'] ?? null
         ], false);
     }
-    
+
+    $token = bin2hex(random_bytes(32));
     $sessionInfo = createUserSession($user['id'], $token);
     
     // Log successful login

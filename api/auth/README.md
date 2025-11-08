@@ -10,7 +10,8 @@ Creates a new vendor account with pending status (requires admin approval).
 ```json
 {
   "email": "vendor@example.com",
-  "password": "password123"
+  "password": "password123",
+  "force_login": false
 }
 ```
 
@@ -78,7 +79,7 @@ Authenticates user and returns user data with role and status.
 }
 ```
 
-### Response (Error - 400/403)
+### Response (Error - 400/403/409)
 
 **Invalid Credentials (400):**
 ```json
@@ -101,6 +102,18 @@ Authenticates user and returns user data with role and status.
 {
   "status": "error",
   "message": "Your account has been suspended. Please contact support."
+}
+```
+
+**Already Logged In (409):**
+```json
+{
+  "status": "error",
+  "message": "You are already logged in on another device. Please log out there first or set force_login=true to override.",
+  "code": "CONCURRENT_SESSION",
+  "data": {
+    "session_expires_at": "2025-11-07 18:30:00"
+  }
 }
 ```
 
@@ -167,10 +180,11 @@ const signup = async (email, password) => {
 
 ### Login
 ```javascript
-const login = async (email, password) => {
+const login = async (email, password, forceLogin = false) => {
   const response = await axios.post('http://localhost/backend/api/auth/login.php', {
     email,
-    password
+    password,
+    force_login: forceLogin
   });
   
   if (response.data.status === 'success') {
@@ -190,6 +204,23 @@ const login = async (email, password) => {
   }
   
   return response.data;
+};
+
+// Handling 409 response and optionally forcing login
+const attemptLogin = async (email, password) => {
+  const result = await login(email, password);
+
+  if (result.status === 'error' && result.code === 'CONCURRENT_SESSION') {
+    const confirmOverride = window.confirm(
+      'You are already logged in on another device. Force logout the other session?'
+    );
+
+    if (confirmOverride) {
+      return login(email, password, true);
+    }
+  }
+
+  return result;
 };
 ```
 
