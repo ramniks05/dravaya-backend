@@ -72,7 +72,8 @@ Authenticates user and returns user data with role and status.
       "role": "vendor",        // 'admin' or 'vendor'
       "status": "active"       // 'active', 'pending', or 'suspended'
     },
-    "token": "session-token-here"
+    "token": "session-token-here",
+    "session_expires_at": "2025-11-07 18:30:00"
   }
 }
 ```
@@ -133,6 +134,22 @@ CREATE TABLE users (
 );
 ```
 
+Active session records are stored in the `user_sessions` table (created automatically on demand):
+
+```sql
+CREATE TABLE IF NOT EXISTS user_sessions (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id VARCHAR(36) NOT NULL,
+    token VARCHAR(128) NOT NULL UNIQUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    expires_at DATETIME NOT NULL,
+    is_active TINYINT(1) DEFAULT 1,
+    INDEX idx_user (user_id),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+```
+
 ---
 
 ## Example Usage (React/Axios)
@@ -157,10 +174,11 @@ const login = async (email, password) => {
   });
   
   if (response.data.status === 'success') {
-    const { user, token } = response.data.data;
+    const { user, token, session_expires_at } = response.data.data;
     
     // Store token in localStorage or cookie
     localStorage.setItem('token', token);
+    localStorage.setItem('session_expires_at', session_expires_at);
     localStorage.setItem('user', JSON.stringify(user));
     
     // Redirect based on role
@@ -183,5 +201,62 @@ const login = async (email, password) => {
 2. **Email Validation**: Email is validated using PHP's `filter_var()` with `FILTER_VALIDATE_EMAIL`.
 3. **SQL Injection**: Protected using prepared statements.
 4. **CORS**: Configured in `config.php` to allow React frontend origins.
-5. **Token**: Simple session token is generated. Consider implementing JWT for production.
+5. **Session Tokens**: A simple session token is generated, with only one active session per user. New logins automatically invalidate previous sessions. Tokens expire after 12 hours. Consider implementing JWT for production.
+
+---
+
+## Logout Endpoint
+
+**POST** `/api/auth/logout.php`
+
+Invalidates the current session token. Token can be supplied in the `Authorization: Bearer <token>` header or in the JSON body.
+
+### Request Body (optional)
+```json
+{
+  "token": "session-token-here"
+}
+```
+
+### Response (Success - 200)
+```json
+{
+  "status": "success",
+  "message": "Logged out"
+}
+```
+
+If the token is already expired, invalid, or missing, the endpoint still returns success for idempotency.
+
+---
+
+## Logout From All Devices
+
+**POST** `/api/auth/logout_all.php`
+
+Terminates every active session for the authenticated user (forced logout on all devices).
+
+### Request
+Provide the current session token in the `Authorization` header (recommended) or JSON body.
+
+```http
+POST /api/auth/logout_all.php
+Authorization: Bearer session-token-here
+```
+
+```json
+{
+  "token": "session-token-here"
+}
+```
+
+### Response (Success - 200)
+```json
+{
+  "status": "success",
+  "message": "All sessions have been terminated"
+}
+```
+
+If the token is missing, expired, or invalid, the endpoint still returns success and clears any matching session record.
 
